@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toronto Bike Share</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --green: #2D7A3A; --green-light: #3DA64F; --green-dark: #1E5528;
+    --green-pale: #E8F5EA; --red: #E03131; --orange: #F08C00;
+    --yellow: #F5C800; --bg: #F4F6F3; --surface: #FFFFFF;
+    --surface2: #F0F4F1; --border: #D8E4DA; --text: #1A2E1C;
+    --text2: #4A6650; --text3: #7A9A80;
+    --shadow: 0 2px 12px rgba(30,85,40,0.10);
+    --shadow-lg: 0 8px 32px rgba(30,85,40,0.15);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+  .topbar { background:var(--green); color:white; display:flex; align-items:center; justify-content:space-between; padding:0 20px; height:58px; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,0.2); z-index:1000; }
+  .topbar-logo { display:flex; align-items:center; gap:10px; }
+  .topbar-logo svg { width:28px; height:28px; }
+  .topbar-logo span { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; letter-spacing:-0.3px; }
+  .topbar-logo small { font-size:10px; opacity:0.75; font-weight:400; display:block; margin-top:-3px; letter-spacing:0.5px; }
+  .topbar-actions { display:flex; gap:8px; align-items:center; }
+  .btn-icon { background:rgba(255,255,255,0.15); border:none; color:white; border-radius:8px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .badge { background:var(--yellow); color:#5A3800; font-size:10px; font-weight:700; border-radius:10px; padding:1px 6px; }
+  .live-dot { width:8px; height:8px; background:#4ade80; border-radius:50%; display:inline-block; margin-right:4px; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  .tabs { background:var(--surface); display:flex; border-bottom:1px solid var(--border); flex-shrink:0; z-index:999; }
+  .tab { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; padding:9px 0; cursor:pointer; color:var(--text3); font-size:10px; font-weight:600; letter-spacing:0.3px; transition:all 0.2s; border-bottom:2.5px solid transparent; }
+  .tab svg { width:20px; height:20px; }
+  .tab.active { color:var(--green); border-bottom-color:var(--green); }
+  .tab:hover:not(.active) { color:var(--green-light); background:var(--green-pale); }
+
+  .main { flex:1; overflow:hidden; position:relative; }
+  .screen { display:none; height:100%; flex-direction:column; overflow:hidden; }
+  .screen.active { display:flex; }
+
+  .loading-overlay { position:absolute; inset:0; background:rgba(244,246,243,0.93); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:999; gap:12px; }
+  .loading-spinner { width:36px; height:36px; border:3px solid var(--border); border-top-color:var(--green); border-radius:50%; animation:spin 0.8s linear infinite; }
+  .loading-text { font-size:13px; color:var(--text3); font-weight:600; }
+
+  #map { flex:1; z-index:1; }
+  .map-overlay-top { position:absolute; top:12px; left:12px; right:12px; z-index:10; display:flex; gap:8px; }
+  .search-box { flex:1; background:white; border-radius:12px; box-shadow:var(--shadow-lg); display:flex; align-items:center; padding:0 14px; gap:10px; height:46px; }
+  .search-box input { border:none; outline:none; font-size:14px; font-family:'DM Sans',sans-serif; color:var(--text); flex:1; background:transparent; }
+  .search-box input::placeholder { color:var(--text3); }
+  .filter-btn { background:white; border:none; border-radius:12px; box-shadow:var(--shadow-lg); width:46px; height:46px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--green); }
+  .map-legend { position:absolute; bottom:110px; left:12px; z-index:10; background:white; border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); font-size:11px; }
+  .map-legend div { display:flex; align-items:center; gap:6px; margin-bottom:5px; color:var(--text2); }
+  .map-legend div:last-child { margin-bottom:0; }
+  .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .map-fab { position:absolute; bottom:110px; right:12px; z-index:10; background:var(--green); border:none; color:white; border-radius:50%; width:50px; height:50px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:var(--shadow-lg); font-size:22px; }
+
+  .station-sheet { position:absolute; bottom:0; left:0; right:0; background:white; border-radius:20px 20px 0 0; box-shadow:0 -4px 30px rgba(0,0,0,0.12); z-index:20; padding:0 16px 20px; display:none; }
+  .station-sheet.open { display:block; animation:slideUp 0.3s ease; }
+  @keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+  .sheet-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:10px auto 16px; }
+  .sheet-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+  .sheet-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; color:var(--text); }
+  .sheet-subtitle { font-size:12px; color:var(--text3); margin-top:2px; }
+  .sheet-close { background:var(--surface2); border:none; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text2); flex-shrink:0; }
+  .sheet-stats { display:flex; gap:10px; margin-bottom:12px; }
+  .sheet-stat { flex:1; background:var(--surface2); border-radius:12px; padding:12px; text-align:center; }
+  .sheet-stat-num { font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; }
+  .sheet-stat-label { font-size:11px; color:var(--text3); margin-top:2px; }
+  .stat-green{color:var(--green)} .stat-orange{color:var(--orange)} .stat-gray{color:var(--text3)}
+  .capacity-bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; margin-bottom:14px; }
+  .capacity-fill { height:100%; border-radius:3px; transition:width 0.4s; }
+  .btn-unlock { width:100%; background:var(--green); color:white; border:none; border-radius:14px; padding:16px; font-size:15px; font-weight:700; font-family:'DM Sans',sans-serif; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition:background 0.2s; }
+  .btn-unlock:hover:not(:disabled) { background:var(--green-light); }
+  .btn-unlock:disabled { background:var(--text3); cursor:not-allowed; }
+
+  .list-header { background:var(--surface); padding:16px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .list-search { background:var(--surface2); border-radius:12px; display:flex; align-items:center; padding:0 14px; gap:10px; height:44px; margin-bottom:12px; }
+  .list-search input { border:none; outline:none; background:transparent; font-family:'DM Sans',sans-serif; font-size:14px; flex:1; color:var(--text); }
+  .filter-chips { display:flex; gap:8px; overflow-x:auto; padding-bottom:2px; }
+  .filter-chips::-webkit-scrollbar { display:none; }
+  .chip { flex-shrink:0; border:1.5px solid var(--border); background:white; border-radius:20px; padding:5px 13px; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; transition:all 0.15s; white-space:nowrap; }
+  .chip.active { background:var(--green); color:white; border-color:var(--green); }
+  .list-count { font-size:12px; color:var(--text3); padding:8px 16px 0; flex-shrink:0; }
+  .stations-list { overflow-y:auto; flex:1; padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .station-card { background:white; border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer; transition:box-shadow 0.2s,transform 0.15s; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .station-card:hover { box-shadow:var(--shadow); transform:translateY(-1px); }
+  .station-icon { width:42px; height:42px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:18px; }
+  .icon-green{background:var(--green-pale)} .icon-orange{background:#FFF3CD} .icon-red{background:#FEE}
+  .station-info { flex:1; min-width:0; }
+  .station-name { font-weight:600; font-size:14px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .station-address { font-size:12px; color:var(--text3); margin-top:2px; }
+  .station-right { text-align:right; flex-shrink:0; }
+  .station-bikes { font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; }
+  .station-docks { font-size:11px; color:var(--text3); margin-top:1px; }
+
+  .ride-content { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:16px; }
+  .ride-hero { background:linear-gradient(135deg,var(--green-dark),var(--green)); border-radius:20px; padding:24px; color:white; text-align:center; position:relative; overflow:hidden; }
+  .ride-hero::before { content:''; position:absolute; top:-40px; right:-40px; width:160px; height:160px; background:rgba(255,255,255,0.07); border-radius:50%; }
+  .ride-status { font-size:11px; font-weight:700; letter-spacing:1px; opacity:0.8; text-transform:uppercase; margin-bottom:6px; }
+  .ride-timer { font-family:'Space Grotesk',sans-serif; font-size:52px; font-weight:700; letter-spacing:-2px; line-height:1; margin-bottom:4px; }
+  .ride-timer-sub { font-size:12px; opacity:0.75; }
+  .ride-metrics { display:grid; grid-template-columns:1fr 1fr 1fr; margin-top:20px; border-top:1px solid rgba(255,255,255,0.2); padding-top:16px; }
+  .ride-metric { text-align:center; }
+  .ride-metric-val { font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; }
+  .ride-metric-label { font-size:10px; opacity:0.7; margin-top:2px; }
+  .btn-end-ride { background:white; color:var(--green-dark); border:none; border-radius:14px; padding:16px; font-size:15px; font-weight:700; font-family:'DM Sans',sans-serif; cursor:pointer; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .ride-info-card { background:white; border-radius:16px; padding:16px; box-shadow:0 1px 4px rgba(0,0,0,0.06); }
+  .ride-info-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); }
+  .ride-info-row:last-child { border-bottom:none; padding-bottom:0; }
+  .ride-info-label { font-size:13px; color:var(--text3); }
+  .ride-info-val { font-size:13px; font-weight:600; color:var(--text); }
+  .no-ride { display:flex; flex-direction:column; align-items:center; padding:40px 24px; text-align:center; }
+  .no-ride-icon { font-size:64px; margin-bottom:16px; opacity:0.4; }
+  .no-ride-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; color:var(--text); margin-bottom:8px; }
+  .no-ride-text { font-size:14px; color:var(--text3); max-width:260px; margin-bottom:24px; line-height:1.5; }
+  .btn-find { background:var(--green); color:white; border:none; border-radius:14px; padding:14px 28px; font-size:15px; font-weight:700; font-family:'DM Sans',sans-serif; cursor:pointer; }
+  .ride-history-item { display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }
+  .ride-history-item:last-child { border-bottom:none; }
+  .ride-hist-icon { width:36px; height:36px; background:var(--green-pale); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
+  .ride-hist-info { flex:1; }
+  .ride-hist-route { font-weight:600; font-size:13px; color:var(--text); }
+  .ride-hist-date { font-size:11px; color:var(--text3); margin-top:2px; }
+  .ride-hist-right { text-align:right; }
+  .ride-hist-dur { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; }
+  .ride-hist-cost { font-size:11px; color:var(--text3); }
+
+  .notif { position:fixed; top:70px; left:50%; transform:translateX(-50%); background:var(--text); color:white; border-radius:12px; padding:12px 20px; font-size:13px; font-weight:600; z-index:9999; box-shadow:var(--shadow-lg); display:none; white-space:nowrap; }
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+  .custom-marker { cursor:pointer; }
+  .marker-dot { border-radius:50%; border:2.5px solid white; box-shadow:0 2px 6px rgba(0,0,0,0.25); }
+
+  /* ── PLAN FAB ── */
+  .plan-fab { position:absolute; bottom:170px; right:12px; z-index:10; background:#1E5528; border:none; color:white; border-radius:14px; padding:0 14px; height:44px; display:flex; align-items:center; gap:7px; cursor:pointer; box-shadow:var(--shadow-lg); font-size:13px; font-weight:700; font-family:'DM Sans',sans-serif; letter-spacing:0.2px; }
+  .plan-fab svg { width:17px; height:17px; }
+
+  /* ── PLANNER PANEL ── */
+  .planner-panel { position:fixed; bottom:0; left:0; right:0; background:white; border-radius:20px 20px 0 0; box-shadow:0 -4px 30px rgba(0,0,0,0.15); z-index:1500; display:none; max-height:calc(100vh - 120px); overflow-y:auto; }
+  .planner-panel.open { display:block; animation:slideUp 0.3s ease; }
+  .planner-drag { width:36px; height:4px; background:var(--border); border-radius:2px; margin:10px auto 0; }
+  .planner-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px 10px; border-bottom:1px solid var(--border); position:relative; }
+  .planner-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px; color:var(--text); display:flex; align-items:center; gap:8px; }
+  .planner-close { background:var(--surface2); border:none; border-radius:50%; width:30px; height:30px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text2); font-size:15px; }
+
+  .planner-body { padding:16px; display:flex; flex-direction:column; gap:14px; }
+
+  /* Station picker */
+  .station-picker { background:var(--surface2); border-radius:14px; overflow:visible; }
+  .picker-row { display:flex; align-items:center; gap:10px; padding:11px 14px; position:relative; }
+  .picker-row + .picker-row { border-top:1px solid var(--border); }
+  .picker-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .picker-dot.from { background:var(--green); }
+  .picker-dot.to   { background:var(--red); }
+  .picker-input { flex:1; border:none; background:transparent; font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); outline:none; }
+  .picker-input::placeholder { color:var(--text3); }
+  .picker-clear { background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px; padding:2px; }
+  .picker-connector { position:absolute; left:18px; top:100%; width:2px; height:0; background:var(--border); z-index:1; }
+  .autocomplete-list { position:fixed; background:white; border-radius:12px; box-shadow:var(--shadow-lg); z-index:9999; overflow:hidden; max-height:200px; overflow-y:auto; display:none; width:calc(100% - 32px); left:16px; }
+  .autocomplete-list.show { display:block; }
+  .autocomplete-item { padding:11px 14px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:10px; color:var(--text); }
+  .autocomplete-item:hover { background:var(--green-pale); }
+  .autocomplete-item .ac-bikes { font-size:11px; color:var(--text3); margin-left:auto; flex-shrink:0; }
+  .autocomplete-item .ac-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+  /* Time selector */
+  .time-selector { background:var(--surface2); border-radius:14px; padding:12px 14px; }
+  .time-selector-label { font-size:11px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; }
+  .time-toggle { display:flex; background:var(--border); border-radius:10px; padding:3px; margin-bottom:12px; }
+  .time-toggle-btn { flex:1; border:none; background:transparent; border-radius:8px; padding:7px; font-size:12px; font-weight:700; font-family:'DM Sans',sans-serif; color:var(--text3); cursor:pointer; transition:all 0.2s; }
+  .time-toggle-btn.active { background:white; color:var(--green); box-shadow:0 1px 4px rgba(0,0,0,0.10); }
+  .time-input-row { display:flex; align-items:center; gap:10px; }
+  .time-input-row input[type=time] { flex:1; border:none; background:white; border-radius:10px; padding:10px 14px; font-size:15px; font-family:'DM Sans',sans-serif; color:var(--text); font-weight:600; outline:none; box-shadow:0 1px 4px rgba(0,0,0,0.07); }
+  .btn-plan { flex:1; background:var(--green); color:white; border:none; border-radius:10px; padding:11px; font-size:14px; font-weight:700; font-family:'DM Sans',sans-serif; cursor:pointer; transition:background 0.2s; }
+  .btn-plan:hover { background:var(--green-light); }
+  .btn-plan:disabled { background:var(--text3); cursor:not-allowed; }
+
+  /* Result card */
+  .plan-result { border-radius:14px; overflow:hidden; display:none; }
+  .plan-result.show { display:block; animation:fadeIn 0.3s ease; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+  .result-hero { padding:16px; color:white; }
+  .result-hero.ok   { background:linear-gradient(135deg,#1E5528,#2D7A3A); }
+  .result-hero.warn { background:linear-gradient(135deg,#7A5000,#F08C00); }
+  .result-hero.bad  { background:linear-gradient(135deg,#7A0000,#E03131); }
+  .result-verdict { font-size:11px; font-weight:700; letter-spacing:1px; opacity:0.85; text-transform:uppercase; margin-bottom:4px; }
+  .result-title { font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; margin-bottom:12px; line-height:1.3; }
+  .result-timing { display:flex; gap:0; background:rgba(255,255,255,0.12); border-radius:12px; overflow:hidden; }
+  .result-time-block { flex:1; padding:10px 14px; text-align:center; }
+  .result-time-block + .result-time-block { border-left:1px solid rgba(255,255,255,0.2); }
+  .result-time-val { font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; }
+  .result-time-label { font-size:10px; opacity:0.75; margin-top:2px; }
+
+  .result-details { background:white; border-top:1px solid var(--border); }
+  .result-detail-row { display:flex; justify-content:space-between; align-items:center; padding:11px 16px; border-bottom:1px solid var(--border); }
+  .result-detail-row:last-child { border-bottom:none; }
+  .result-detail-label { font-size:13px; color:var(--text3); display:flex; align-items:center; gap:6px; }
+  .result-detail-val { font-size:13px; font-weight:600; color:var(--text); text-align:right; max-width:60%; }
+
+  /* Alternatives */
+  .alt-section { padding:14px 16px; background:white; border-top:1px solid var(--border); }
+  .alt-title { font-size:12px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; }
+  .alt-card { display:flex; align-items:center; gap:12px; padding:10px 12px; background:var(--surface2); border-radius:12px; margin-bottom:8px; cursor:pointer; transition:background 0.15s; }
+  .alt-card:last-child { margin-bottom:0; }
+  .alt-card:hover { background:var(--green-pale); }
+  .alt-card-icon { width:34px; height:34px; border-radius:10px; background:white; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .alt-card-info { flex:1; min-width:0; }
+  .alt-card-name { font-size:13px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .alt-card-sub  { font-size:11px; color:var(--text3); margin-top:2px; }
+  .alt-card-right { text-align:right; flex-shrink:0; }
+  .alt-card-dist { font-size:12px; font-weight:700; color:var(--green); }
+  .alt-card-walk { font-size:10px; color:var(--text3); }
+
+  /* ── POINTS SYSTEM ── */
+  .points-badge { background:#7C3AED; color:white; font-size:10px; font-weight:700; border-radius:10px; padding:1px 7px; display:flex; align-items:center; gap:3px; }
+  .points-banner { border-radius:12px; padding:12px 14px; margin-bottom:14px; display:flex; align-items:center; gap:10px; }
+  .points-banner.earn  { background:linear-gradient(135deg,#5B21B6,#7C3AED); color:white; }
+  .points-banner.tip   { background:linear-gradient(135deg,#92400E,#D97706); color:white; }
+  .points-banner-icon  { font-size:22px; flex-shrink:0; }
+  .points-banner-text  { flex:1; }
+  .points-banner-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; line-height:1.3; }
+  .points-banner-sub   { font-size:11px; opacity:0.85; margin-top:3px; }
+  .points-banner-pts   { font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; flex-shrink:0; }
+  .sheet-points-banner { border-radius:12px; padding:11px 14px; margin-bottom:12px; display:flex; align-items:center; gap:10px; background:linear-gradient(135deg,#5B21B6,#7C3AED); color:white; }
+  .nearby-pts-card { background:#F5F3FF; border:1.5px solid #DDD6FE; border-radius:12px; padding:12px 14px; margin-top:10px; }
+  .nearby-pts-title { font-size:11px; font-weight:700; color:#6D28D9; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; display:flex; align-items:center; gap:5px; }
+  .nearby-pts-item { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid #EDE9FE; cursor:pointer; }
+  .nearby-pts-item:last-child { border-bottom:none; padding-bottom:0; }
+  .nearby-pts-item:hover .nearby-pts-name { color:#6D28D9; }
+  .nearby-pts-name { flex:1; font-size:12px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nearby-pts-info { font-size:11px; color:var(--text3); }
+  .nearby-pts-earn { font-size:12px; font-weight:700; color:#7C3AED; flex-shrink:0; }
+
+  /* Star marker overlay */
+  .marker-star { position:absolute; top:-8px; right:-8px; font-size:10px; line-height:1; pointer-events:none; }
+
+  /* End ride modal */
+  .end-ride-modal { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:2000; display:none; align-items:flex-end; justify-content:center; }
+  .end-ride-modal.open { display:flex; animation:fadeIn 0.2s ease; }
+  .end-ride-sheet { background:white; border-radius:20px 20px 0 0; padding:20px 16px 32px; width:100%; max-height:85vh; overflow-y:auto; }
+  .end-ride-title { font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px; color:var(--text); margin-bottom:6px; }
+  .end-ride-sub { font-size:13px; color:var(--text3); margin-bottom:16px; }
+  .end-ride-search { background:var(--surface2); border-radius:12px; display:flex; align-items:center; padding:0 14px; gap:10px; height:46px; margin-bottom:10px; position:relative; }
+  .end-ride-search input { border:none; background:transparent; font-family:'DM Sans',sans-serif; font-size:14px; flex:1; color:var(--text); outline:none; }
+  .end-ride-ac { position:fixed; background:white; border-radius:12px; box-shadow:var(--shadow-lg); z-index:2100; overflow:hidden; max-height:200px; overflow-y:auto; display:none; width:calc(100% - 32px); left:16px; }
+  .end-ride-ac.show { display:block; }
+  .btn-skip-return { width:100%; background:var(--surface2); color:var(--text2); border:none; border-radius:14px; padding:14px; font-size:14px; font-weight:600; font-family:'DM Sans',sans-serif; cursor:pointer; margin-top:8px; }
+
+  /* Points celebration */
+  .points-celebration { position:fixed; top:80px; left:50%; transform:translateX(-50%); background:linear-gradient(135deg,#5B21B6,#7C3AED); color:white; border-radius:16px; padding:14px 24px; font-size:14px; font-weight:700; z-index:9999; box-shadow:0 8px 32px rgba(124,58,237,0.4); display:none; text-align:center; white-space:nowrap; }
+
+  /* Map click mode */
+  .map-click-hint { position:absolute; top:70px; left:50%; transform:translateX(-50%); background:var(--text); color:white; border-radius:10px; padding:8px 16px; font-size:12px; font-weight:600; z-index:30; white-space:nowrap; display:none; }
+  .map-click-hint.show { display:block; animation:fadeIn 0.2s ease; }
+  .plan-marker-from .marker-dot { background:var(--green) !important; border:3px solid white !important; width:18px !important; height:18px !important; }
+  .plan-marker-to   .marker-dot { background:var(--red) !important;   border:3px solid white !important; width:18px !important; height:18px !important; }
+
+  /* ── PREDICTION BANNER ── */
+  .pred-banner { border-radius:12px; padding:13px 14px; margin-top:10px; display:flex; align-items:flex-start; gap:10px; animation:fadeIn 0.4s ease; }
+  .pred-banner.pred-normal   { background:#E8F5EA; border:1.5px solid #A8D5AD; }
+  .pred-banner.pred-low      { background:#FFF3CD; border:1.5px solid #FFD666; }
+  .pred-banner.pred-critical { background:#FEE; border:1.5px solid #F5A0A0; }
+  .pred-banner.pred-loading  { background:var(--surface2); border:1.5px solid var(--border); }
+  .pred-banner.pred-na       { background:var(--surface2); border:1.5px dashed var(--border); }
+  .pred-icon { font-size:20px; flex-shrink:0; margin-top:1px; }
+  .pred-body { flex:1; min-width:0; }
+  .pred-label { font-size:10px; font-weight:700; letter-spacing:0.8px; text-transform:uppercase; margin-bottom:3px; }
+  .pred-label.pred-normal   { color:#1E5528; }
+  .pred-label.pred-low      { color:#7A5000; }
+  .pred-label.pred-critical { color:#7A0000; }
+  .pred-label.pred-loading  { color:var(--text3); }
+  .pred-label.pred-na       { color:var(--text3); }
+  .pred-msg { font-size:13px; font-weight:500; color:var(--text); line-height:1.4; }
+  .pred-sub { font-size:11px; color:var(--text3); margin-top:3px; }
+  .pred-stamp { font-size:10px; color:var(--text3); margin-top:5px; font-style:italic; }
+  .pred-bikes-row { display:flex; gap:12px; margin-top:8px; }
+  .pred-bike-chip { background:rgba(0,0,0,0.06); border-radius:8px; padding:5px 10px; font-size:12px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:5px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg viewBox="0 0 32 32" fill="none">
+      <circle cx="8" cy="20" r="5" stroke="white" stroke-width="2"/>
+      <circle cx="24" cy="20" r="5" stroke="white" stroke-width="2"/>
+      <path d="M8 20L14 10H20L24 20" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M16 10L18 14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <span>Bike Share Toronto</span>
+      <small><span class="live-dot"></span>LIVE DATA</small>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span class="badge" id="totalBikes">Loading...</span>
+    <span class="points-badge" id="pointsBadge">⭐ 0 pts</span>
+    <button class="btn-icon" onclick="refreshData()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('map',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/></svg>
+    MAP
+  </div>
+  <div class="tab" onclick="switchTab('list',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3" cy="6" r="1.5" fill="currentColor"/><circle cx="3" cy="12" r="1.5" fill="currentColor"/><circle cx="3" cy="18" r="1.5" fill="currentColor"/></svg>
+    STATIONS
+  </div>
+  <div class="tab" onclick="switchTab('ride',this)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    MY RIDES
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- MAP -->
+  <div class="screen active" id="screen-map" style="position:relative;">
+    <div id="map"></div>
+    <div class="map-overlay-top">
+      <div class="search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" placeholder="Search stations..." id="mapSearch" oninput="searchOnMap()" autocomplete="off"/>
+          <div id="mapSearchAC" style="position:fixed;background:white;border-radius:12px;box-shadow:0 8px 32px rgba(30,85,40,0.15);z-index:9999;overflow:hidden;max-height:260px;overflow-y:auto;display:none;width:calc(100% - 80px);left:12px;"></div>
+      </div>
+      <button class="filter-btn" onclick="showNotif('🔧 Filters coming soon')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="map-legend">
+      <div><div class="dot" style="background:#2D7A3A"></div> Bikes Available</div>
+      <div><div class="dot" style="background:#F08C00"></div> Low # of Bikes</div>
+      <div><div class="dot" style="background:#E03131"></div> Empty / Critical</div>
+    </div>
+    <button class="map-fab" onclick="locateUser()">📍</button>
+    <button class="plan-fab" onclick="openPlanner()" id="planFab">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      PLAN TRIP
+    </button>
+    <div class="map-click-hint" id="mapClickHint">📍 Tap a station on the map</div>
+    <div class="loading-overlay" id="mapLoading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Loading live station data...</div>
+    </div>
+    <div class="station-sheet" id="stationSheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header">
+        <div style="flex:1;min-width:0">
+          <div class="sheet-title" id="sheetName">—</div>
+          <div class="sheet-subtitle" id="sheetAddr">—</div>
+        </div>
+        <button class="sheet-close" onclick="closeSheet()">✕</button>
+      </div>
+      <div class="sheet-stats">
+        <div class="sheet-stat"><div class="sheet-stat-num stat-green" id="sheetBikes">—</div><div class="sheet-stat-label">🚲 Bikes</div></div>
+        <div class="sheet-stat"><div class="sheet-stat-num stat-orange" id="sheetEbikes">—</div><div class="sheet-stat-label">⚡ E-Bikes</div></div>
+        <div class="sheet-stat"><div class="sheet-stat-num stat-gray" id="sheetDocks">—</div><div class="sheet-stat-label">🔒 Free Docks</div></div>
+      </div>
+      <div class="capacity-bar"><div class="capacity-fill" id="sheetCapBar" style="width:0%"></div></div>
+      <div id="sheetPointsBanner" style="display:none;" class="sheet-points-banner">
+        <span style="font-size:10px;">⭐</span>
+        <div style="flex:1;">
+          <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;">Drop a bike here — earn points!</div>
+          <div style="font-size:11px;opacity:0.85;margin-top:2px;" id="sheetPointsSubtitle">This station needs bikes</div>
+        </div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;" id="sheetPointsAmt">+15</div>
+      </div>
+      <button class="btn-unlock" id="unlockBtn" onclick="startRide()">🔓 Unlock a Bike</button>
+    </div>
+    <!-- PLANNER PANEL -->
+    <div class="planner-panel" id="plannerPanel">
+      <div class="planner-drag"></div>
+      <div class="planner-header">
+        <div class="planner-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Plan Your Trip
+        </div>
+        <button class="planner-close" onclick="closePlanner()" style="position:absolute;top:12px;right:12px;z-index:50;">✕</button>
+      </div>
+
+      <div class="planner-body">
+
+        <!-- FROM / TO pickers -->
+        <div style="position:relative;">
+          <div class="station-picker">
+            <div class="picker-row" style="position:relative;">
+              <div class="picker-dot from"></div>
+              <input class="picker-input" id="fromInput" placeholder="From station…" oninput="onPickerInput('from')" autocomplete="off"/>
+              <button class="picker-clear" id="fromClear" onclick="clearPicker('from')" style="display:none">✕</button>
+              <button onclick="startMapPick('from')" style="flex-shrink:0;background:var(--green-pale);color:var(--green-dark);border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:11px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">
+                📍 Select from Map
+              </button>
+              <div class="autocomplete-list" id="fromAC"></div>
+            </div>
+            <div class="picker-row" style="position:relative;">
+              <div class="picker-dot to"></div>
+              <input class="picker-input" id="toInput" placeholder="To station…" oninput="onPickerInput('to')" autocomplete="off"/>
+              <button class="picker-clear" id="toClear" onclick="clearPicker('to')" style="display:none">✕</button>
+              <button onclick="startMapPick('to')" style="flex-shrink:0;background:#FEE;color:#7A0000;border:1px solid #FCC;border-radius:8px;padding:5px 9px;font-size:11px;font-weight:700;font-family:'DM Sans',sans-serif;cursor:pointer;white-space:nowrap;">
+                📍 Select from Map
+              </button>
+              <div class="autocomplete-list" id="toAC"></div>
+            </div>
+          </div>
+          <!-- swap button -->
+          <button onclick="swapStations()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:white;border:1.5px solid var(--border);border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:5;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,0.10);">⇅</button>
+        </div>
+        
+
+        <!-- Time selector -->
+        <div class="time-selector">
+          <div class="time-selector-label">When?</div>
+          <div class="time-toggle">
+            <button class="time-toggle-btn active" id="toggleLeave" onclick="setTimeMode('leave')">Leave at</button>
+            <button class="time-toggle-btn" id="toggleArrive" onclick="setTimeMode('arrive')">Arrive by</button>
+          </div>
+          <div class="time-input-row">
+            <input type="time" id="tripTime" />
+            <button class="btn-plan" onclick="calculatePlan()" id="btnPlan" disabled>Go →</button>
+          </div>
+        </div>
+
+        <!-- Result -->
+        <div class="plan-result" id="planResult">
+          <div class="result-hero ok" id="resultHero">
+            <div class="result-verdict" id="resultVerdict">✅ GOOD TO GO</div>
+            <div class="result-title" id="resultTitle">Your trip looks great!</div>
+            <div class="result-timing" id="resultTiming"></div>
+          </div>
+          <div class="result-details" id="resultDetails"></div>
+          <div class="alt-section" id="altSection" style="display:none;">
+            <div class="alt-title" id="altTitle"></div>
+            <div id="altList"></div>
+          </div>
+          <!-- PREDICTION BANNER — injected by buildPredictionBanner() -->
+          <div id="predBannerContainer"></div>
+        </div>
+
+      </div>
+    </div>
+  </div><!-- end screen-map -->
+  <div class="screen" id="screen-list">
+    <div class="list-header">
+      <div class="list-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7A9A80" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Search stations..." id="listSearch" oninput="filterStations()"/>
+      </div>
+      <div class="filter-chips">
+        <div class="chip active" onclick="setChip(this)">All</div>
+        <div class="chip" onclick="setChip(this)">Available</div>
+        <div class="chip" onclick="setChip(this)">E-Bike</div>
+        <div class="chip" onclick="setChip(this)">Free Docks</div>
+        <div class="chip" onclick="setChip(this)">Empty/Critical</div>
+      </div>
+    </div>
+    <div class="list-count" id="listCount"></div>
+    <div class="stations-list" id="stationList">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Loading stations...</div>
+    </div>
+  </div>
+
+  <!-- RIDES -->
+  <div class="screen" id="screen-ride">
+    <div class="ride-content">
+      <div id="activeRide" style="display:none;">
+        <div class="ride-hero">
+          <div class="ride-status">🟢 RIDE IN PROGRESS</div>
+          <div class="ride-timer" id="rideTimer">00:00</div>
+          <div class="ride-timer-sub" id="rideBikeInfo">🚲 Classic Bike</div>
+          <div class="ride-metrics">
+            <div class="ride-metric"><div class="ride-metric-val" id="rideDist">0.0</div><div class="ride-metric-label">km est.</div></div>
+            <div class="ride-metric"><div class="ride-metric-val" id="rideCal">0</div><div class="ride-metric-label">cal</div></div>
+            <div class="ride-metric"><div class="ride-metric-val" id="rideCost2">$0.00</div><div class="ride-metric-label">cost</div></div>
+          </div>
+        </div>
+        <div class="ride-info-card" style="margin-top:16px">
+          <div class="ride-info-row"><span class="ride-info-label">Started at</span><span class="ride-info-val" id="rideStartStation">—</span></div>
+          <div class="ride-info-row"><span class="ride-info-label">Unlock time</span><span class="ride-info-val" id="rideStartTime">—</span></div>
+          <div class="ride-info-row"><span class="ride-info-label">Plan</span><span class="ride-info-val">Annual — 30 min free</span></div>
+        </div>
+        <button class="btn-end-ride" style="margin-top:16px" onclick="endRide()">🔒 End Ride & Return Bike</button>
+      </div>
+      <div id="noRide">
+        <div class="no-ride">
+          <div class="no-ride-icon">🚲</div>
+          <div class="no-ride-title">No active ride</div>
+          <div class="no-ride-text">Find a nearby station and unlock a bike to start exploring Toronto.</div>
+          <button class="btn-find" onclick="switchTab('map',document.querySelectorAll('.tab')[0])">Find a Bike</button>
+        </div>
+        <div class="ride-info-card">
+          <div class="section-title">Recent Rides</div>
+          <div id="rideHistory"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="notif" id="notif"></div>
+<div class="points-celebration" id="pointsCelebration"></div>
+
+<!-- END RIDE MODAL -->
+<div class="end-ride-modal" id="endRideModal">
+  <div class="end-ride-sheet">
+    <div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 16px;"></div>
+    <div class="end-ride-title">🔒 Where did you return the bike?</div>
+    <div class="end-ride-sub">Search for your drop-off station to check if you earned points!</div>
+    <div class="end-ride-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7A9A80" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" placeholder="Search drop-off station..." id="returnStationInput" oninput="onReturnStationInput()" autocomplete="off"/>
+    </div>
+    <div class="end-ride-ac" id="returnStationAC"></div>
+    <button class="btn-skip-return" onclick="skipReturnStation()">Skip — don't check points</button>
+  </div>
+</div>
+
+<script>
+const INFO_URL   = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_information.json';
+const STATUS_URL = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_status.json';
+
+// ── PREDICTION SYSTEM ─────────────────────────────────────────
+// 🔧 CONFIGURA ESTA URL con tu Gist después de crearlo:
+const PREDICTIONS_URL = 'https://gist.githubusercontent.com/MiguelUNFC/21487b686e0443f11e193a5b8a88c0fb/raw/bikeshare_predictions.json';
+let predictionsCache = null;    // { meta, stations: Map<station_id, {...}> }
+let predictionsLoadedAt = null; // Date cuando se cargó
+
+async function loadPredictions() {
+  try {
+    // Usar la API de GitHub para obtener el raw_url con hash — bypasea el CDN cache
+    const metaRes  = await fetch('https://api.github.com/gists/21487b686e0443f11e193a5b8a88c0fb');
+    if (!metaRes.ok) throw new Error('Gist meta HTTP ' + metaRes.status);
+    const metaJson = await metaRes.json();
+    const rawUrl   = metaJson.files['bikeshare_predictions.json'].raw_url;
+
+    const res  = await fetch(rawUrl);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const map  = new Map();
+    (data.stations || []).forEach(s => map.set(String(s.station_id), s));
+    predictionsCache    = { meta: data.meta || {}, byId: map };
+    predictionsLoadedAt = new Date();
+    console.log(`[Predictions] Loaded ${map.size} stations for ${data.meta?.predicted_for_hour || '?'}`);
+  } catch(e) {
+    console.warn('[Predictions] Could not load:', e.message);
+    predictionsCache = null;
+  }
+}
+
+function getPrediction(stationId) {
+  if (!predictionsCache) return null;
+  return predictionsCache.byId.get(String(stationId)) || null;
+}
+
+function buildPredictionBanner(fromStation, toStation, leaveTime, arriveTime) {
+  const container = document.getElementById('predBannerContainer');
+  if (!container) return;
+
+  // Sin predicciones cargadas → no mostrar nada
+  if (!predictionsCache) { container.innerHTML = ''; return; }
+
+  const scoredAt = predictionsCache.meta?.scored_at_utc
+    ? new Date(predictionsCache.meta.scored_at_utc).toLocaleTimeString('en-CA', {hour:'2-digit', minute:'2-digit'})
+    : '?';
+
+  // ── Ventana del modelo ───────────────────────────────────────
+  // El forecast cubre [modelWindowStart, modelWindowEnd)
+  // La ventana ACTIVA empieza 30 min antes del inicio del forecast
+  const anyPred = predictionsCache.byId.values().next().value;
+  const modelWindowStart = anyPred?.predicted_for_hour_local
+    ? new Date(anyPred.predicted_for_hour_local) : null;
+  const modelWindowEnd = modelWindowStart
+    ? new Date(modelWindowStart.getTime() + 60 * 60 * 1000) : null;
+  const activeWindowStart = modelWindowStart
+    ? new Date(modelWindowStart.getTime() - 30 * 60 * 1000) : null;
+
+  if (!modelWindowStart) { container.innerHTML = ''; return; }
+
+  const fmtWindow = `${modelWindowStart.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'})} – ${modelWindowEnd.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'})}`;
+  const fmtWindowEnd = modelWindowEnd.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'});
+
+  // ── ¿Tiempo cae dentro de la ventana activa? ─────────────────
+  function inWindow(t) {
+    return t >= activeWindowStart && t < modelWindowEnd;
+  }
+
+  // ── ¿Usuario ya está en el origen? (≤ 30 min) ───────────────
+  const now            = new Date();
+  const minsUntilLeave = (leaveTime - now) / 60000;
+  const alreadyThere   = planTimeMode === 'leave' && minsUntilLeave <= 30;
+
+  // ── Banner de "fuera de ventana" ─────────────────────────────
+  const outOfWindowBanner = `<div class="pred-banner pred-na">
+    <div class="pred-icon">🕐</div>
+    <div class="pred-body">
+      <div class="pred-label pred-na">ML Prediction — Outside Forecast Window</div>
+      <div class="pred-msg">No forecast available for your selected time.</div>
+      <div class="pred-sub">Forecasts are only available until <strong>${fmtWindowEnd}</strong>. Try a trip within that window.</div>
+      <div class="pred-stamp">Model updated at ${scoredAt}</div>
+    </div>
+  </div>`;
+
+  // ── Helper para un banner individual ────────────────────────
+  function makeBanner(pred, stationName, focusOn) {
+    if (!pred) {
+      // Estación fuera del bounding de downtown
+      return `<div class="pred-banner pred-na">
+        <div class="pred-icon">📍</div>
+        <div class="pred-body">
+          <div class="pred-label pred-na">ML Prediction — Outside Coverage Area</div>
+          <div class="pred-msg"><strong>${stationName}</strong> is outside the forecast coverage area.</div>
+          <div class="pred-sub">Forecasts only cover downtown Toronto stations and this station is simply outside that boundary.</div>
+          <div class="pred-stamp">Model updated at ${scoredAt}</div>
+        </div>
+      </div>`;
+    }
+
+    const predBikes = Math.round(pred.predicted_bikes_next_hour ?? 0);
+    const predDocks = Math.round(pred.predicted_docks_next_hour ?? 0);
+    let cls, icon, label, msg, sub;
+
+    if (focusOn === 'docks') {
+      if (predDocks <= 1) {
+        cls='pred-critical'; icon='🚨'; label='DESTINATION ML Prediction — No free docks';
+        msg = `<strong>${stationName}</strong> will likely have no free docks. Around ${predDocks} dock${predDocks!==1?'s':''} by the time of your arrival.`;
+        sub = `You may not be able to return the bike. Consider an alternative drop-off.`;
+      } else if (predDocks <= 3) {
+        cls='pred-low'; icon='⚠️'; label='DESTINATION ML Prediction — Few Free Docks';
+        msg = `<strong>${stationName}</strong> will have only ~${predDocks} free dock${predDocks!==1?'s':''} during your arrival.`;
+        sub = `Might get tight. Have a nearby station as backup.`;
+      } else {
+        cls='pred-normal'; icon='✅'; label='DESTINATION ML Prediction — Docks Available';
+        msg = `<strong>${stationName}</strong> should have ~${predDocks} free dock${predDocks!==1?'s':''} during your arrival.`;
+        sub = `You should be able to return the bike without issues.`;
+      }
+    } else {
+      if (predBikes <= 1) {
+        cls='pred-critical'; icon='🚨'; label='ORIGIN ML Prediction — Empty';
+        msg = `<strong>${stationName}</strong> will likely have no bikes. Around ${predBikes} bike${predBikes!==1?'s':''} by the time you pick up.`;
+        sub = `Consider choosing a different departure station.`;
+      } else if (predBikes <= 3) {
+        cls='pred-low'; icon='⚠️'; label='ORIGIN ML Prediction — Few Bikes';
+        msg = `<strong>${stationName}</strong> will have only ~${predBikes} bike${predBikes!==1?'s':''} by the time you pick up.`;
+        sub = `Availability may be tight. Check nearby stations as backup.`;
+      } else {
+        cls='pred-normal'; icon='✅'; label='ORIGIN ML Prediction — Bikes Available';
+        msg = `<strong>${stationName}</strong> should have ~${predBikes} bike${predBikes!==1?'s':''} by the time you pick up.`;
+        sub = `Looks good for your departure.`;
+      }
+    }
+
+    return `<div class="pred-banner ${cls}">
+      <div class="pred-icon">${icon}</div>
+      <div class="pred-body">
+        <div class="pred-label ${cls}">${label}</div>
+        <div class="pred-msg">${msg}</div>
+        <div class="pred-sub">${sub}</div>
+        <div class="pred-bikes-row">
+          <div class="pred-bike-chip">🚲 ~${predBikes} bikes</div>
+          <div class="pred-bike-chip">🔒 ~${predDocks} docks</div>
+        </div>
+        <div class="pred-stamp">Forecast window: ${fmtWindow} · Model updated at ${scoredAt}</div>
+      </div>
+    </div>`;
+  }
+
+  // ── LÓGICA PRINCIPAL ─────────────────────────────────────────
+  const originName = fromStation.name.split('/')[0].trim();
+  const destName   = toStation.name.split('/')[0].trim();
+
+  const showOrigin = !alreadyThere && inWindow(leaveTime);
+  const showDest   = inWindow(arriveTime);
+
+  // Ninguno aplica → no mostrar nada
+  if (!showOrigin && !showDest) {
+    // Solo mostrar "fuera de ventana" si ambos tiempos son futuros pero se pasan
+    const bothFuture = leaveTime > now && arriveTime > now;
+    const bothPast   = arriveTime <= activeWindowStart;
+    if (bothFuture && arriveTime >= modelWindowEnd) {
+      container.innerHTML = outOfWindowBanner;
+    } else {
+      container.innerHTML = '';
+    }
+    return;
+  }
+
+  let html = '';
+  if (showOrigin) html += makeBanner(getPrediction(fromStation.id), originName, 'bikes');
+  if (showDest)   html += makeBanner(getPrediction(toStation.id),   destName,   'docks');
+  container.innerHTML = html;
+}
+
+
+let allStations = [];
+let map, markers = {};
+let selectedStation = null;
+let rideInterval = null, rideSeconds = 0;
+
+// ── FETCH ────────────────────────────────────────────────────
+async function fetchData() {
+  try {
+    const [infoRes, statusRes] = await Promise.all([fetch(INFO_URL), fetch(STATUS_URL)]);
+    const infoJson   = await infoRes.json();
+    const statusJson = await statusRes.json();
+    const infoMap = {};
+    infoJson.data.stations.forEach(s => infoMap[s.station_id] = s);
+    allStations = statusJson.data.stations.map(s => {
+      const info = infoMap[s.station_id];
+      if (!info || info.lat < 43.5 || info.lat > 43.9) return null;
+
+      let ebikes = 0;
+      if (typeof s.num_ebikes_available === 'number') {
+        ebikes = s.num_ebikes_available;
+      } else if (Array.isArray(s.vehicle_types_available)) {
+        const ebikeType = s.vehicle_types_available.find(
+          v => v.vehicle_type_id && v.vehicle_type_id.toLowerCase().includes('ebike')
+        );
+        ebikes = ebikeType ? (ebikeType.count || 0) : 0;
+      } else if (s.num_bikes_available_types) {
+        ebikes = s.num_bikes_available_types.ebike || 0;
+      }
+
+      const total   = s.num_bikes_available || 0;
+      const classic = Math.max(0, total - ebikes);
+      return {
+        id: s.station_id, name: info.name,
+        lat: info.lat, lng: info.lon,
+        capacity: info.capacity || 0,
+        bikes: classic, ebikes,
+        docks: s.num_docks_available || 0,
+        is_renting: !!s.is_renting,
+        is_installed: !!s.is_installed,
+      };
+    }).filter(Boolean).sort((a,b) => a.name.localeCompare(b.name));
+    return true;
+  } catch(e) {
+    showNotif('⚠️ Could not load data. Check connection.'); return false;
+  }
+}
+
+async function refreshData() {
+  showNotif('🔄 Refreshing...');
+  document.getElementById('mapLoading').style.display = 'flex';
+  await fetchData();
+  updateMap(); renderList();
+  updateBadge();
+  document.getElementById('mapLoading').style.display = 'none';
+  showNotif('✅ Data updated!');
+}
+
+function updateBadge() {
+  const total = allStations.reduce((a,s) => a + s.bikes + s.ebikes, 0);
+  document.getElementById('totalBikes').textContent = `🚲 ${total.toLocaleString()}`;
+}
+
+// ── MAP ──────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map', {zoomControl:false}).setView([43.655, -79.385], 13);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution:'©OpenStreetMap ©Carto', maxZoom:19
+  }).addTo(map);
+  L.control.zoom({position:'bottomright'}).addTo(map);
+}
+
+function stationColor(s) {
+  if (!s.is_installed || !s.is_renting) return '#999';
+  if (s.capacity === 0) return '#999';
+  const pct = (s.bikes + s.ebikes) / s.capacity * 100;
+  return pct === 0 ? '#E03131' : pct < 15 ? '#E03131' : pct < 40 ? '#F08C00' : '#2D7A3A';
+}
+
+function updateMap() {
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  allStations.forEach(s => {
+    const color  = stationColor(s);
+    const status = stationStatus(s);
+    const showStar = (status === 'empty' || status === 'critical');
+    const sz = 12;
+    const starHtml = showStar
+      ? `<div style="position:absolute;top:-5px;right:-1px;font-size:6px;line-height:1;pointer-events:none;">⭐</div>`
+      : '';
+    const icon = L.divIcon({
+      className:'custom-marker',
+      html:`<div style="position:relative;width:${sz}px;height:${sz}px;">
+        <div class="marker-dot" style="background:${color};width:${sz}px;height:${sz}px;"></div>
+        ${starHtml}
+      </div>`,
+      iconSize:[sz,sz], iconAnchor:[sz/2,sz/2]
+    });
+    const m = L.marker([s.lat,s.lng],{icon}).addTo(map);
+    m.on('click', () => handleMarkerClick(s));
+    markers[s.id] = m;
+  });
+}
+
+function openSheet(s) {
+  selectedStation = s;
+  const total = s.bikes + s.ebikes;
+  document.getElementById('sheetName').textContent = s.name;
+  document.getElementById('sheetAddr').textContent = `Station #${s.id} · Capacity: ${s.capacity}`;
+  document.getElementById('sheetBikes').textContent = s.bikes;
+  document.getElementById('sheetEbikes').textContent = s.ebikes;
+  document.getElementById('sheetDocks').textContent = s.docks;
+  const pct = s.capacity > 0 ? Math.round(total / s.capacity * 100) : 0;
+  const bar = document.getElementById('sheetCapBar');
+  bar.style.width = pct + '%';
+  bar.style.background = stationColor(s);
+  const btn = document.getElementById('unlockBtn');
+  btn.disabled = total === 0 || !s.is_renting;
+  btn.innerHTML = !s.is_renting ? '🚫 Station offline' : total === 0 ? '😔 No bikes available' : '🔓 Unlock a Bike';
+
+  // Points banner
+  const status = stationStatus(s);
+  const banner = document.getElementById('sheetPointsBanner');
+  if (status === 'empty' || status === 'critical') {
+    const pts = status === 'empty' ? 15 : 10;
+    document.getElementById('sheetPointsAmt').textContent = `+${pts}`;
+    document.getElementById('sheetPointsSubtitle').textContent =
+      status === 'empty' ? 'This station is empty — it needs bikes urgently!' : 'Very few bikes here — drop one off & earn!';
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  document.getElementById('stationSheet').classList.add('open');
+  map.panTo([s.lat, s.lng], {animate:true});
+}
+
+function closeSheet() { document.getElementById('stationSheet').classList.remove('open'); }
+
+function locateUser() {
+  showNotif('📍 Finding your location...');
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(pos => {
+    map.setView([pos.coords.latitude, pos.coords.longitude], 15, {animate:true});
+    L.circleMarker([pos.coords.latitude, pos.coords.longitude],
+      {radius:8, fillColor:'#4A90E2', color:'white', weight:2, fillOpacity:1}).addTo(map);
+  });
+}
+
+function searchOnMap() {
+  const inp = document.getElementById('mapSearch');
+  const ac  = document.getElementById('mapSearchAC');
+  const q   = inp.value.toLowerCase().trim();
+  if (!q || q.length < 2) { ac.style.display='none'; return; }
+  const matches = allStations.filter(s => s.name.toLowerCase().includes(q)).slice(0,7);
+  if (!matches.length) { ac.style.display='none'; return; }
+  ac.innerHTML = matches.map(s => {
+    const t = s.bikes + s.ebikes;
+    const col = t===0?'#E03131':t<=3?'#F08C00':'#2D7A3A';
+    return `<div onclick="goToStationFromSearch('${s.id}')" style="padding:11px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#1A2E1C;border-bottom:1px solid #D8E4DA;">
+      <div style="width:9px;height:9px;border-radius:50%;background:${col};flex-shrink:0;"></div>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.name}</span>
+      <span style="font-size:11px;color:#7A9A80;flex-shrink:0;">🚲${s.bikes} ⚡${s.ebikes}</span>
+    </div>`;
+  }).join('');
+  const rect = inp.getBoundingClientRect();
+  ac.style.top = (rect.bottom + 6) + 'px';
+  ac.style.display = 'block';
+}
+
+function goToStationFromSearch(id) {
+  const s = allStations.find(x => x.id===id);
+  if (!s) return;
+  document.getElementById('mapSearchAC').style.display = 'none';
+  document.getElementById('mapSearch').value = '';
+  map.setView([s.lat, s.lng], 16, {animate:true});
+  openSheet(s);
+}
+
+// ── LIST ─────────────────────────────────────────────────────
+function renderList() {
+  const q    = document.getElementById('listSearch').value.toLowerCase();
+  const chip = document.querySelector('#screen-list .chip.active')?.textContent || 'All';
+  const filtered = allStations.filter(s => s.name.toLowerCase().includes(q)).filter(s => {
+    if (chip==='Available') return s.bikes+s.ebikes > 0;
+    if (chip==='E-Bike')    return s.ebikes > 0;
+    if (chip==='Free Docks') return s.docks > 0;
+    //if (chip==='Empty')     return s.bikes+s.ebikes === 0;
+    if (chip==='Empty/Critical') return (s.bikes+s.ebikes)/s.capacity*100 < 15;
+    return true;
+  });
+  document.getElementById('listCount').textContent = `${filtered.length} stations`;
+  const list = document.getElementById('stationList');
+  if (!filtered.length) { list.innerHTML='<div style="text-align:center;padding:40px;color:var(--text3)">No stations found</div>'; return; }
+  list.innerHTML = filtered.map(s => {
+    const t      = s.bikes + s.ebikes;
+    const status = stationStatus(s); // usa porcentaje: empty/critical/low/good/offline
+    const emoji  = (status==='empty'||status==='critical'||status==='offline') ? '🔴'
+                 : status==='low' ? '🟡' : '🟢';
+    const cls    = (status==='empty'||status==='critical'||status==='offline') ? 'icon-red'
+                 : status==='low' ? 'icon-orange' : 'icon-green';
+    const color  = stationColor(s);
+    const sub    = [s.ebikes>0?`⚡ ${s.ebikes} e-bike${s.ebikes>1?'s':''}`:'', !s.is_renting?'🚫 Offline':''].filter(Boolean).join(' · ') || `Capacity: ${s.capacity}`;
+    return `<div class="station-card" onclick="goToStation('${s.id}')">
+      <div class="station-icon ${cls}">${emoji}</div>
+      <div class="station-info">
+        <div class="station-name">${s.name}</div>
+        <div class="station-address">${sub}</div>
+      </div>
+      <div class="station-right">
+        <div class="station-bikes" style="color:${color}">${t}</div>
+        <div class="station-docks">${s.docks} docks free</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function goToStation(id) {
+  const s = allStations.find(x => x.id===id); if(!s) return;
+  switchTab('map', document.querySelectorAll('.tab')[0]);
+  setTimeout(()=>{ map.setView([s.lat,s.lng],16); openSheet(s); }, 200);
+}
+function filterStations() { renderList(); }
+function setChip(el) {
+  document.querySelectorAll('#screen-list .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active'); renderList();
+}
+
+// ── RIDES ─────────────────────────────────────────────────────
+function startRide() {
+  if (!selectedStation || (selectedStation.bikes+selectedStation.ebikes)===0) return;
+  closeSheet();
+  rideSeconds = 0;
+  const now = new Date();
+  document.getElementById('rideStartStation').textContent = selectedStation.name;
+  document.getElementById('rideStartTime').textContent = now.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('rideBikeInfo').textContent = selectedStation.ebikes>0 ? '⚡ E-Bike' : '🚲 Classic Bike';
+  document.getElementById('activeRide').style.display = 'block';
+  document.getElementById('noRide').style.display = 'none';
+  switchTab('ride', document.querySelectorAll('.tab')[2]);
+  if (rideInterval) clearInterval(rideInterval);
+  rideInterval = setInterval(updateRide, 1000);
+  showNotif('🔓 Bike unlocked! Enjoy your ride.');
+}
+
+function updateRide() {
+  rideSeconds++;
+  const m = Math.floor(rideSeconds/60).toString().padStart(2,'0');
+  const s = (rideSeconds%60).toString().padStart(2,'0');
+  document.getElementById('rideTimer').textContent = `${m}:${s}`;
+  document.getElementById('rideDist').textContent = (rideSeconds*0.004).toFixed(1);
+  document.getElementById('rideCal').textContent = Math.floor(rideSeconds*0.08);
+  const mins = rideSeconds/60;
+  document.getElementById('rideCost2').textContent = `$${(mins>30?(mins-30)*0.12:0).toFixed(2)}`;
+}
+
+function endRide() {
+  clearInterval(rideInterval);
+  // Open return station modal
+  document.getElementById('returnStationInput').value = '';
+  document.getElementById('returnStationAC').classList.remove('show');
+  document.getElementById('endRideModal').classList.add('open');
+}
+
+function onReturnStationInput() {
+  const inp = document.getElementById('returnStationInput');
+  const ac  = document.getElementById('returnStationAC');
+  const q   = inp.value.toLowerCase().trim();
+  if (!q || q.length < 2) { ac.classList.remove('show'); return; }
+  const matches = allStations.filter(s => s.name.toLowerCase().includes(q)).slice(0,6);
+  if (!matches.length) { ac.classList.remove('show'); return; }
+  ac.innerHTML = matches.map(s => {
+    const status = stationStatus(s);
+    const pts    = calcPoints(selectedStation, s);
+    const col    = status==='empty'||status==='critical' ? '#E03131' : status==='low' ? '#F08C00' : '#2D7A3A';
+    const ptsHtml = pts > 0 ? `<span style="font-size:11px;font-weight:700;color:#7C3AED;flex-shrink:0;">⭐+${pts}</span>` : '';
+    return `<div onclick="confirmReturn('${s.id}')" style="padding:11px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#1A2E1C;border-bottom:1px solid #D8E4DA;">
+      <div style="width:9px;height:9px;border-radius:50%;background:${col};flex-shrink:0;"></div>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.name}</span>
+      ${ptsHtml}
+    </div>`;
+  }).join('');
+  const rect = inp.getBoundingClientRect();
+  ac.style.top = (rect.bottom + 6) + 'px';
+  ac.classList.add('show');
+}
+
+function confirmReturn(stationId) {
+  const returnStation = allStations.find(s => s.id === stationId);
+  document.getElementById('endRideModal').classList.remove('open');
+  document.getElementById('activeRide').style.display = 'none';
+  document.getElementById('noRide').style.display = 'block';
+  const dur = Math.floor(rideSeconds / 60);
+  if (returnStation) {
+    const pts = calcPoints(selectedStation, returnStation);
+    if (pts > 0) {
+      setTimeout(() => addPoints(pts), 400);
+      showNotif(`🔒 Ride ended · ${dur} min · ⭐ +${pts} pts earned!`);
+    } else {
+      showNotif(`🔒 Ride ended · ${dur} min · Thanks!`);
+    }
+  } else {
+    showNotif(`🔒 Ride ended · ${dur} min · Thanks!`);
+  }
+}
+
+function skipReturnStation() {
+  document.getElementById('endRideModal').classList.remove('open');
+  document.getElementById('activeRide').style.display = 'none';
+  document.getElementById('noRide').style.display = 'block';
+  const dur = Math.floor(rideSeconds / 60);
+  showNotif(`🔒 Ride ended · ${dur} min · Thanks!`);
+}
+
+document.getElementById('rideHistory').innerHTML = [
+  {from:"Bay St / Queens Quay",to:"King St / Bay St",date:"Today, 8:42 AM",dur:"12 min",cost:"$0.00"},
+  {from:"Dundas / McCaul",to:"Spadina / College",date:"Yesterday, 5:18 PM",dur:"28 min",cost:"$1.50"},
+  {from:"Queen W / Spadina",to:"Bathurst / Queen",date:"Mon, Mar 10",dur:"9 min",cost:"$0.00"},
+].map(r=>`<div class="ride-history-item">
+  <div class="ride-hist-icon">🚲</div>
+  <div class="ride-hist-info"><div class="ride-hist-route">${r.from} → ${r.to}</div><div class="ride-hist-date">${r.date}</div></div>
+  <div class="ride-hist-right"><div class="ride-hist-dur">${r.dur}</div><div class="ride-hist-cost">${r.cost}</div></div>
+</div>`).join('');
+
+// ── POINTS SYSTEM ────────────────────────────────────────────
+let userPoints = 0;
+
+function stationStatus(s) {
+  if (!s.is_installed || !s.is_renting || s.capacity === 0) return 'offline';
+  const pct = (s.bikes + s.ebikes) / s.capacity * 100;
+  if (pct === 0)   return 'empty';    // 🔴
+  if (pct < 15)    return 'critical'; // 🔴
+  if (pct < 40)    return 'low';      // 🟡
+  return 'good';                      // 🟢
+}
+
+function calcPoints(fromStation, toStation) {
+  if (!fromStation || !toStation) return 0;
+  const fromStatus = stationStatus(fromStation);
+  const toStatus   = stationStatus(toStation);
+  // No bikes at origin = can't earn
+  if (fromStatus === 'empty' || fromStatus === 'critical' || fromStatus === 'offline') return 0;
+  // Destination must need bikes
+  if (toStatus === 'empty')    return fromStatus === 'good' ? 15 : 5;
+  if (toStatus === 'critical') return fromStatus === 'good' ? 10 : 5;
+  if (toStatus === 'low')      return fromStatus === 'good' ? 8  : 0;
+  return 0; // green → green = no points
+}
+
+function addPoints(pts) {
+  userPoints += pts;
+  document.getElementById('pointsBadge').textContent = `⭐ ${userPoints} pts`;
+  const cel = document.getElementById('pointsCelebration');
+  cel.innerHTML = `⭐ +${pts} points earned! Total: ${userPoints} pts`;
+  cel.style.display = 'block';
+  setTimeout(() => cel.style.display = 'none', 3500);
+}
+
+function updatePointsBadgeTopbar() {
+  document.getElementById('pointsBadge').textContent = `⭐ ${userPoints} pts`;
+}
+
+// ── PLANNER ───────────────────────────────────────────────────
+let planFrom = null, planTo = null;
+let planTimeMode = 'leave'; // 'leave' | 'arrive'
+let mapPickMode  = null;    // 'from' | 'to' | null
+let planRouteLayer = null;
+let planMarkerFrom = null, planMarkerTo = null;
+
+function openPlanner() {
+  closePlanner._open = true;
+  document.getElementById('plannerPanel').classList.add('open');
+  document.getElementById('planFab').style.display = 'none';
+  // Set current time as default
+  const now = new Date();
+  document.getElementById('tripTime').value =
+    `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+}
+
+function closePlanner() {
+  document.getElementById('plannerPanel').classList.remove('open');
+  document.getElementById('planFab').style.display = 'flex';
+  cancelMapPick();
+}
+
+function setTimeMode(mode) {
+  planTimeMode = mode;
+  document.getElementById('toggleLeave').classList.toggle('active', mode==='leave');
+  document.getElementById('toggleArrive').classList.toggle('active', mode==='arrive');
+}
+
+// ── AUTOCOMPLETE ─────────────────────────────────────────────
+function onPickerInput(side) {
+  const inp = document.getElementById(side+'Input');
+  const ac  = document.getElementById(side+'AC');
+  const q   = inp.value.toLowerCase().trim();
+  document.getElementById(side+'Clear').style.display = q ? 'block' : 'none';
+  if (side==='from') planFrom = null;
+  else               planTo   = null;
+  updatePlanBtn();
+  if (!q || q.length < 2) { ac.classList.remove('show'); return; }
+  const matches = allStations.filter(s => s.name.toLowerCase().includes(q)).slice(0,6);
+  if (!matches.length) { ac.classList.remove('show'); return; }
+  ac.innerHTML = matches.map(s => {
+    const t = s.bikes+s.ebikes;
+    const col = t===0?'#E03131':t<=3?'#F08C00':'#2D7A3A';
+    return `<div class="autocomplete-item" onclick="selectStation('${side}','${s.id}')">
+      <div class="ac-dot" style="background:${col}"></div>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.name}</span>
+      <span class="ac-bikes">🚲${s.bikes} ⚡${s.ebikes}</span>
+    </div>`;
+  }).join('');
+  const rect = inp.getBoundingClientRect();
+  ac.style.top = (rect.bottom + 6) + 'px';
+  ac.classList.add('show');
+}
+
+function selectStation(side, id) {
+  const s = allStations.find(x => x.id===id);
+  if (!s) return;
+  if (side==='from') { planFrom = s; document.getElementById('fromInput').value = s.name; }
+  else               { planTo   = s; document.getElementById('toInput').value   = s.name; }
+  document.getElementById(side+'Clear').style.display = 'block';
+  document.getElementById(side+'AC').classList.remove('show');
+  setPlanMarker(side, s);
+  updatePlanBtn();
+}
+
+function clearPicker(side) {
+  document.getElementById(side+'Input').value = '';
+  document.getElementById(side+'Clear').style.display = 'none';
+  document.getElementById(side+'AC').classList.remove('show');
+  if (side==='from') { planFrom = null; if(planMarkerFrom){ map.removeLayer(planMarkerFrom); planMarkerFrom=null; } }
+  else               { planTo   = null; if(planMarkerTo)  { map.removeLayer(planMarkerTo);   planMarkerTo=null;   } }
+  if (planRouteLayer) { map.removeLayer(planRouteLayer); planRouteLayer=null; }
+  document.getElementById('planResult').classList.remove('show');
+  updatePlanBtn();
+}
+
+function swapStations() {
+  const tmpS = planFrom; planFrom = planTo; planTo = tmpS;
+  document.getElementById('fromInput').value = planFrom ? planFrom.name : '';
+  document.getElementById('toInput').value   = planTo   ? planTo.name   : '';
+  document.getElementById('fromClear').style.display = planFrom ? 'block':'none';
+  document.getElementById('toClear').style.display   = planTo   ? 'block':'none';
+  if (planFrom) setPlanMarker('from', planFrom);
+  if (planTo)   setPlanMarker('to',   planTo);
+  updatePlanBtn();
+}
+
+function updatePlanBtn() {
+  document.getElementById('btnPlan').disabled = !(planFrom && planTo && planFrom.id !== planTo.id);
+}
+
+// ── MAP PICK MODE ─────────────────────────────────────────────
+function startMapPick(side) {
+  mapPickMode = side;
+  const hint = document.getElementById('mapClickHint');
+  hint.textContent = side==='from' ? '🟢 Tap a station — FROM' : '🔴 Tap a station — TO';
+  hint.classList.add('show');
+  // Scroll panel up a bit so map is visible
+  document.getElementById('plannerPanel').style.maxHeight = '42vh';
+}
+
+function cancelMapPick() {
+  mapPickMode = null;
+  document.getElementById('mapClickHint').classList.remove('show');
+  document.getElementById('plannerPanel').style.maxHeight = '92vh';
+}
+
+function setPlanMarker(side, s) {
+  if (side==='from') {
+    if (planMarkerFrom) map.removeLayer(planMarkerFrom);
+    planMarkerFrom = L.marker([s.lat,s.lng], {
+      icon: L.divIcon({ className:'custom-marker plan-marker-from',
+        html:`<div class="marker-dot" style="background:var(--black);width:11px;height:11px;border:3px solid white;"></div>`,
+        iconSize:[18,18], iconAnchor:[9,9] })
+    }).addTo(map);
+  } else {
+    if (planMarkerTo) map.removeLayer(planMarkerTo);
+    planMarkerTo = L.marker([s.lat,s.lng], {
+      icon: L.divIcon({ className:'custom-marker plan-marker-to',
+        html:`<div style="font-size:24px;line-height:1;margin-top:-10px;">📍</div>`,
+        iconSize:[24,24], iconAnchor:[9,9] })
+    }).addTo(map);
+  }
+}
+
+// Override map marker click to handle plan-pick mode
+function handleMarkerClick(s) {
+  if (mapPickMode) {
+    selectStation(mapPickMode, s.id);
+    cancelMapPick();
+    map.panTo([s.lat, s.lng]);
+  } else {
+    openSheet(s);
+  }
+}
+
+// ── OSRM ROUTE ────────────────────────────────────────────────
+async function fetchRoute(from, to) {
+  try {
+    const url = `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data.code !== 'Ok') return null;
+    return data.routes[0]; // { distance (m), duration (s), geometry }
+  } catch(e) { return null; }
+}
+
+// ── HAVERSINE DISTANCE ────────────────────────────────────────
+function haversine(a, b) {
+  const R = 6371000;
+  const dLat = (b.lat-a.lat)*Math.PI/180;
+  const dLng = (b.lng-a.lng)*Math.PI/180;
+  const x = Math.sin(dLat/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+
+// ── MAIN CALCULATE ────────────────────────────────────────────
+async function calculatePlan() {
+  if (!planFrom || !planTo) return;
+  const btn = document.getElementById('btnPlan');
+  btn.textContent = '⏳'; btn.disabled = true;
+
+  // Fetch real route
+  const route = await fetchRoute(planFrom, planTo);
+  const distM   = route ? route.distance : haversine(planFrom, planTo);
+  const distKm  = distM / 1000;
+  const SPEED   = 15; // km/h average cycling
+  const rideMin = Math.round(distKm / SPEED * 60);
+
+  // Draw route on map
+  if (planRouteLayer) map.removeLayer(planRouteLayer);
+  if (route) {
+    planRouteLayer = L.geoJSON(route.geometry, {
+      style: { color:'#2D7A3A', weight:4, opacity:0.85, dashArray:'8,6' }
+    }).addTo(map);
+    map.fitBounds(planRouteLayer.getBounds(), { padding:[60,60] });
+  } else {
+    // Fallback straight line
+    planRouteLayer = L.polyline([[planFrom.lat,planFrom.lng],[planTo.lat,planTo.lng]],
+      { color:'#2D7A3A', weight:4, opacity:0.7, dashArray:'8,6' }).addTo(map);
+  }
+
+  // Time calculations
+  const timeVal = document.getElementById('tripTime').value;
+  const [hh, mm] = timeVal.split(':').map(Number);
+  const refDate = new Date(); refDate.setHours(hh,mm,0,0);
+  let leaveTime, arriveTime;
+  if (planTimeMode === 'leave') {
+    leaveTime  = new Date(refDate);
+    arriveTime = new Date(refDate.getTime() + rideMin*60000);
+  } else {
+    arriveTime = new Date(refDate);
+    leaveTime  = new Date(refDate.getTime() - rideMin*60000);
+  }
+  const fmt = d => d.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'});
+
+  // Station health assessment
+  const fromBikes = planFrom.bikes + planFrom.ebikes;
+  const toDocks   = planTo.docks;
+  const fromOk    = planFrom.is_renting && fromBikes > 0;
+  const toOk      = planTo.is_renting   && toDocks   > 0;
+
+  let verdict, heroClass, titleText;
+  if (!planFrom.is_renting) {
+    verdict='🚫 STATION OFFLINE'; heroClass='bad';
+    titleText=`Origin station is offline. Pick another departure.`;
+  } else if (!planTo.is_renting) {
+    verdict='🚫 STATION OFFLINE'; heroClass='bad';
+    titleText=`Destination station is offline. Pick another arrival point.`;
+  } else if (fromBikes === 0 && toDocks === 0) {
+    verdict='BOTH ENDS PROBLEMATIC'; heroClass='bad';
+    titleText=`No bikes at origin AND no free docks at destination.`;
+  } else if (fromBikes === 0) {
+    verdict='🔴 NO BIKES AT ORIGIN'; heroClass='bad';
+    titleText=`No bikes available at ${planFrom.name.split('/')[0].trim()}. Try an alternative.`;
+  } else if (toDocks === 0) {
+    verdict='🔴 NO FREE DOCKS AT DESTINATION'; heroClass='bad';
+    titleText=`No free docks at ${planTo.name.split('/')[0].trim()}. You won't be able to return the bike.`;
+  } else if (fromBikes <= 2 || toDocks <= 2) {
+    verdict='⚠️ VERY LIMITED AVAILABILITY'; heroClass='warn';
+    titleText=`Only ${fromBikes} bike${fromBikes>1?'s':''} at origin · ${toDocks} dock${toDocks>1?'s':''} at destination.`;
+  } else if (fromBikes <= 5 || toDocks <= 5) {
+    verdict='SOMEWHAT LIMITED!'; heroClass='warn';
+    titleText=`Availability is a bit low. Should be fine if you leave soon.`;
+  } else {
+    verdict='✅ GREAT CONDITIONS'; heroClass='ok';
+    titleText=`Plenty of bikes and docks. Your trip looks perfect!`;
+  }
+
+  // Render hero
+  const hero = document.getElementById('resultHero');
+  hero.className = 'result-hero ' + heroClass;
+  document.getElementById('resultVerdict').textContent = verdict;
+  document.getElementById('resultTitle').textContent   = titleText;
+  document.getElementById('resultTiming').innerHTML = `
+    <div class="result-time-block"><div class="result-time-val">${fmt(leaveTime)}</div><div class="result-time-label">🚴 DEPART</div></div>
+    <div class="result-time-block"><div class="result-time-val">${rideMin} min</div><div class="result-time-label">⏱ RIDE TIME</div></div>
+    <div class="result-time-block"><div class="result-time-val">${fmt(arriveTime)}</div><div class="result-time-label">🏁 ARRIVE</div></div>`;
+
+  // Details
+  const cost = rideMin > 30 ? `$${((rideMin-30)*0.12).toFixed(2)} overage` : 'Free (within 30 min)';
+  const ebikeNote = planFrom.ebikes > 0 ? `⚡ ${planFrom.ebikes} e-bike${planFrom.ebikes>1?'s':''} available` : '🚲 Classic bikes only';
+
+  // Points calculation
+  const tripPoints = calcPoints(planFrom, planTo);
+  const fromStatus = stationStatus(planFrom);
+  const toStatus   = stationStatus(planTo);
+
+  // Points banner in result
+  let pointsHtml = '';
+  if (tripPoints > 0) {
+    pointsHtml = `<div class="points-banner earn">
+      <div class="points-banner-icon">⭐</div>
+      <div class="points-banner-text">
+        <div class="points-banner-title">You'll earn points on this trip!</div>
+        <div class="points-banner-sub">You're moving a bike from a well-stocked station to one that needs it.</div>
+      </div>
+      <div class="points-banner-pts">+${tripPoints}</div>
+    </div>`;
+  } else if (fromStatus === 'good' && toStatus === 'good') {
+    // Both green — find nearby critical stations to destination
+    const nearbyCritical = allStations
+      .filter(s => stationStatus(s) === 'empty' || stationStatus(s) === 'critical')
+      .map(s => ({ ...s, dist: haversine(planTo, s) }))
+      .sort((a,b) => a.dist - b.dist)
+      .slice(0, 3);
+    if (nearbyCritical.length) {
+      const nearbyItems = nearbyCritical.map(s => {
+        const walkMin = Math.round(s.dist / 80);
+        const pts = calcPoints(planFrom, s);
+        return `<div class="nearby-pts-item" onclick="useAlt('to','${s.id}')">
+          <span style="font-size:14px;">🔴</span>
+          <span class="nearby-pts-name">${s.name}</span>
+          <span class="nearby-pts-info">~${walkMin} min walk</span>
+          <span class="nearby-pts-earn">⭐+${pts}</span>
+        </div>`;
+      }).join('');
+      pointsHtml = `<div class="points-banner tip">
+        <div class="points-banner-icon">💡</div>
+        <div class="points-banner-text">
+          <div class="points-banner-title">Your destination has plenty of bikes!</div>
+          <div class="points-banner-sub">Consider dropping off at a nearby station in need — and earn points.</div>
+        </div>
+      </div>
+      <div class="nearby-pts-card">
+        <div class="nearby-pts-title">⭐ Nearby stations that need bikes</div>
+        ${nearbyItems}
+      </div>`;
+    }
+  }
+
+  // Inject points html after resultDetails
+  document.getElementById('resultDetails').innerHTML = `
+    <div class="result-detail-row"><span class="result-detail-label">📍 From</span><span class="result-detail-val">${planFrom.name}</span></div>
+    <div class="result-detail-row"><span class="result-detail-label">🏁 To</span><span class="result-detail-val">${planTo.name}</span></div>
+    <div class="result-detail-row"><span class="result-detail-label">📏 Distance</span><span class="result-detail-val">${distKm.toFixed(1)} km ${route?'(by road)':'(est.)'}</span></div>
+    <div class="result-detail-row"><span class="result-detail-label">🚲 Bikes at origin</span><span class="result-detail-val" style="color:${fromBikes===0?'var(--red)':fromBikes<=3?'var(--orange)':'var(--green)'}">${fromBikes} available · ${ebikeNote}</span></div>
+    <div class="result-detail-row"><span class="result-detail-label">🔒 Free docks at dest.</span><span class="result-detail-val" style="color:${toDocks===0?'var(--red)':toDocks<=3?'var(--orange)':'var(--green)'}">${toDocks} free docks</span></div>
+    <div class="result-detail-row"><span class="result-detail-label">💰 Cost</span><span class="result-detail-val">${cost}</span></div>`;
+
+  // Points section
+  const altSection = document.getElementById('altSection');
+  const altList    = document.getElementById('altList');
+  const altTitle   = document.getElementById('altTitle');
+  const needFromAlt = !fromOk;
+  const needToAlt   = !toOk;
+
+  if (pointsHtml) {
+    altSection.style.display = 'block';
+    altTitle.innerHTML = '';
+    altList.innerHTML = pointsHtml;
+  } else if (needFromAlt || needToAlt) {
+    altSection.style.display = 'block';
+    const refStation = needFromAlt ? planFrom : planTo;
+    const label = needFromAlt ? '🟢 Nearby stations with bikes' : '🔵 Nearby stations with free docks';
+    altTitle.textContent = label;
+    const alts = allStations
+      .filter(s => s.id !== refStation.id)
+      .filter(s => needFromAlt ? (s.bikes+s.ebikes)>0 : s.docks>0)
+      .map(s => ({ ...s, dist: haversine(refStation, s) }))
+      .sort((a,b) => a.dist-b.dist)
+      .slice(0,3);
+    altList.innerHTML = alts.map(s => {
+      const walkMin = Math.round(s.dist/80);
+      const info    = needFromAlt ? `🚲${s.bikes} ⚡${s.ebikes} bikes` : `🔒 ${s.docks} free docks`;
+      return `<div class="alt-card" onclick="useAlt('${needFromAlt?'from':'to'}','${s.id}')">
+        <div class="alt-card-icon">${needFromAlt?'🟢':'🔵'}</div>
+        <div class="alt-card-info">
+          <div class="alt-card-name">${s.name}</div>
+          <div class="alt-card-sub">${info}</div>
+        </div>
+        <div class="alt-card-right">
+          <div class="alt-card-dist">${(s.dist/1000).toFixed(2)} km</div>
+          <div class="alt-card-walk">~${walkMin} min walk</div>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    altSection.style.display = 'none';
+  }
+
+  document.getElementById('planResult').classList.add('show');
+  btn.textContent = 'Go →'; btn.disabled = false;
+
+  // ── PREDICTION BANNER ─────────────────────────────────────
+  buildPredictionBanner(planFrom, planTo, leaveTime, arriveTime);
+}
+
+function useAlt(side, id) {
+  selectStation(side, id);
+  // Re-run plan
+  setTimeout(calculatePlan, 300);
+}
+
+// ── TABS / NOTIF ──────────────────────────────────────────────
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  ['map','list','ride'].forEach((n,i)=>{ if(n===name) document.querySelectorAll('.tab')[i].classList.add('active'); });
+  document.getElementById('screen-'+name).classList.add('active');
+  if(name==='map') setTimeout(()=>map.invalidateSize(),100);
+}
+
+let notifTO;
+function showNotif(msg) {
+  const n = document.getElementById('notif');
+  n.textContent = msg; n.style.display = 'block';
+  clearTimeout(notifTO); notifTO = setTimeout(()=>n.style.display='none', 3000);
+}
+
+// ── INIT ──────────────────────────────────────────────────────
+async function init() {
+  initMap();
+  const ok = await fetchData();
+  document.getElementById('mapLoading').style.display = 'none';
+  if (ok) { updateMap(); renderList(); updateBadge(); }
+  setInterval(async()=>{ await fetchData(); updateMap(); renderList(); updateBadge(); }, 60000);
+  map.on('click', () => { document.getElementById('mapSearchAC').style.display = 'none'; });
+
+  // Load ML predictions (non-blocking — si falla la app sigue funcionando)
+  loadPredictions();
+  // Refrescar predicciones cada hora (sinc con el Job de Databricks)
+  setInterval(loadPredictions, 60 * 60 * 1000);
+}
+init();
+
+</script>
+</body>
+</html>
