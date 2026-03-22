@@ -6,7 +6,8 @@ exports.handler = async function(event) {
   const { question, sessionId } = JSON.parse(event.body);
 
   // 1. Obtener access token de Salesforce
-  const tokenRes = await fetch('https://login.salesforce.com/services/oauth2/token', {
+  const tokenRes = await fetch('https://orgfarm-ac1c4d605a-dev-ed.develop.my.salesforce.com/services/oauth2/token', {
+
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
